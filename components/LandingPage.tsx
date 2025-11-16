@@ -10,9 +10,10 @@ interface LandingPageProps {
   settings: AppSettings;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   connectionError?: string | null;
+  onRetryConnection: () => void;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ onStartChatting, settings, setSettings, connectionError }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ onStartChatting, settings, setSettings, connectionError, onRetryConnection }) => {
   const { t } = useTranslation();
 
   const handleClick = () => {
@@ -23,7 +24,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStartChatting, settings, se
   const renderConnectionError = () => {
     if (!connectionError) return null;
 
-    const renderErrorContent = (title: string, content: string) => {
+    const renderErrorContent = (title: string, content: string, showRetry: boolean) => {
         return (
             <div className="absolute top-0 left-0 right-0 bg-red-800/90 border-b border-red-600 p-3 text-center text-white text-sm shadow-lg z-10">
                 <p className="font-bold text-base">{title}</p>
@@ -38,20 +39,30 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStartChatting, settings, se
                         }} 
                      />
                 </div>
+                {showRetry && (
+                  <div className="mt-2">
+                    <button
+                      onClick={onRetryConnection}
+                      className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-2 px-6 rounded-lg transition-colors"
+                    >
+                      Retry Connection
+                    </button>
+                  </div>
+                )}
             </div>
         );
     }
     
     if (connectionError.includes('---SERVER CONNECTION FAILED---')) {
-        return renderErrorContent('Server Connection Failed', connectionError.replace('---SERVER CONNECTION FAILED---', ''));
+        return renderErrorContent('Server Connection Failed', connectionError.replace('---SERVER CONNECTION FAILED---', ''), false);
     }
     
     if (connectionError.includes('---CLIENT CONNECTION FAILED---')) {
-        return renderErrorContent('Client Connection Failed', connectionError.replace('---CLIENT CONNECTION FAILED---', ''));
+        return renderErrorContent('Browser Connection Failed', connectionError.replace('---CLIENT CONNECTION FAILED---', ''), true);
     }
 
     if (connectionError.includes('---API ROUTE FAILED---')) {
-        return renderErrorContent('Deployment Error', connectionError.replace('---API ROUTE FAILED---', ''));
+        return renderErrorContent('Deployment Error', connectionError.replace('---API ROUTE FAILED---', ''), false);
     }
 
     // Fallback for any other generic errors

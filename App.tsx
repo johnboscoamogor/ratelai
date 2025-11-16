@@ -1,6 +1,6 @@
 // This is the root component of the Ratel AI application.
 // It manages user authentication, page routing, and global state like user profile and settings.
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import LandingPage from './components/LandingPage';
 import ChatView from './components/ChatView';
 import AuthModal from './components/AuthModal';
@@ -21,6 +21,12 @@ const App: React.FC = () => {
   const [page, setPage] = useState<'landing' | 'chat' | 'settings' | 'contact' | 'community' | 'admin' | 'examples'>('landing');
   const [loadingSession, setLoadingSession] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+
+  const handleRetryConnection = () => {
+    playSound('click');
+    setRetry(prev => prev + 1);
+  };
 
   // All hooks must be called at the top level, before any conditional returns.
   const defaultSettings: AppSettings = {
@@ -48,7 +54,7 @@ const App: React.FC = () => {
   });
 
   // This logic must be defined outside or above the useEffect that uses it.
-  const updateUserSession = async (session: Session | null, isMounted: boolean) => {
+  const updateUserSession = useCallback(async (session: Session | null, isMounted: boolean) => {
     if (!isMounted || !supabase) return;
 
     if (session?.user) {
@@ -108,7 +114,7 @@ const App: React.FC = () => {
         setUserProfile(null);
         setPage('landing');
     }
-};
+}, []);
 
 
   // Manage user session with Supabase
@@ -124,6 +130,10 @@ const App: React.FC = () => {
     
     // This function runs all checks and initializes the user session.
     const runChecksAndInit = async () => {
+        // Explicitly reset state for retries
+        setLoadingSession(true);
+        setConnectionError(null);
+
         // Step 1: Check if the server can connect to Supabase.
         try {
             const response = await fetch('/api/heartbeat');
@@ -151,13 +161,21 @@ Could not reach the app's own backend health check (/api/heartbeat). This could 
         // Step 2: Server is OK. Now, try connecting from the client.
         sessionTimeout = window.setTimeout(() => {
             if (isMounted && loadingSession) {
-                // FIX: Removed process.env fallback. Client code should exclusively use import.meta.env.
                 const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
                 const clientErrorMsg = `---CLIENT CONNECTION FAILED---
-Your browser is taking too long to connect to Supabase, even though the server can. This is often caused by an ad-blocker, network issue, or incorrect **client-side** variables.
+Your app's backend successfully connected to Supabase, but **your browser could not**. This almost always means something on your computer or network is blocking the connection.
 
-**1. Disable any ad-blockers and try again.**
-**2. Re-verify \`VITE_SUPABASE_URL\` and \`VITE_SUPABASE_ANON_KEY\` (with the 'VITE_' prefix) and re-deploy.**
+**Here are the most common solutions:**
+
+**1. Disable Browser Extensions (Especially Ad-Blockers):**
+*Extensions like uBlock Origin, AdBlock Plus, Brave Shields, or privacy blockers often mistakenly block Supabase.*
+**Please disable them for this site and click "Retry".**
+
+**2. Try a Different Browser or Network:**
+*Switch to a different browser (like Chrome or Firefox) to see if a browser setting is the issue, or try connecting from a different Wi-Fi network (like a phone's hotspot) to rule out a firewall problem.*
+
+**3. Final Check on Keys:**
+*It's very easy to make a small copy-paste error. Please **re-copy** your \`VITE_SUPABASE_ANON_KEY\` from your Supabase dashboard and paste it into Vercel, then re-deploy.*
 
 *URL in use: \`${urlVite || 'URL not found'}\`*`;
                 if (isMounted) {
@@ -176,7 +194,6 @@ Your browser is taking too long to connect to Supabase, even though the server c
             }
         } catch (err: any) {
              clearTimeout(sessionTimeout);
-             // FIX: Removed process.env fallback. Client code should exclusively use import.meta.env.
              const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
              const clientErrorMsg = `---CLIENT CONNECTION FAILED---
 Your browser cannot connect to Supabase. This is often caused by an ad-blocker, network issue, or incorrect **client-side** VITE_ variables.
@@ -203,12 +220,10 @@ Your browser cannot connect to Supabase. This is often caused by an ad-blocker, 
 
     return () => {
         isMounted = false;
-        // FIX: Added a null-conditional operator to prevent a crash if the subscription was never created (e.g., if Supabase is not configured).
         subscription?.unsubscribe();
         clearTimeout(sessionTimeout);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [retry, updateUserSession]);
 
 
   // Save settings whenever they change
@@ -255,7 +270,6 @@ Your browser cannot connect to Supabase. This is often caused by an ad-blocker, 
 
   // Now that hooks are defined, we can handle the configuration error.
   if (!isSupabaseConfigured || !isGeminiConfigured) {
-    // FIX: Removed process.env fallback. Client code should exclusively use import.meta.env.
     const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
     const keyVite = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
     const geminiVite = (import.meta as any).env?.VITE_API_KEY;
@@ -394,7 +408,7 @@ Your browser cannot connect to Supabase. This is often caused by an ad-blocker, 
 
   const renderPage = () => {
     if (!userProfile) {
-        return <LandingPage onStartChatting={handleStartChatting} settings={settings} setSettings={setSettings} connectionError={connectionError} />;
+        return <LandingPage onStartChatting={handleStartChatting} settings={settings} setSettings={setSettings} connectionError={connectionError} onRetryConnection={handleRetryConnection} />;
     }
 
     switch (page) {
@@ -412,7 +426,7 @@ Your browser cannot connect to Supabase. This is often caused by an ad-blocker, 
         }
         return <ChatView userProfile={userProfile} setUserProfile={setUserProfile} settings={settings} setSettings={setSettings} setPage={setPage} onLogout={handleLogout} addXp={addXp} trackInterest={trackInterest} onLevelUp={handleLevelUp} />;
       default:
-        return <LandingPage onStartChatting={handleStartChatting} settings={settings} setSettings={setSettings} connectionError={connectionError} />;
+        return <LandingPage onStartChatting={handleStartChatting} settings={settings} setSettings={setSettings} connectionError={connectionError} onRetryConnection={handleRetryConnection} />;
     }
   };
 
