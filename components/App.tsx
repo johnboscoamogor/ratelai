@@ -1,18 +1,18 @@
 // This is the root component of the Ratel AI application.
 // It manages user authentication, page routing, and global state like user profile and settings.
 import React, { useState, useEffect, useCallback } from 'react';
-import LandingPage from './components/LandingPage';
-import ChatView from './components/ChatView';
-import AuthModal from './components/AuthModal';
-import SettingsPage from './components/SettingsPage';
-import ContactPage from './components/ContactPage';
-import CommunityView from './components/CommunityView';
-import AdminDashboard from './components/AdminDashboard';
-import { UserProfile, AppSettings, RatelMode, Task } from './types';
-import { playSound } from './services/audioService';
-import { supabase, isSupabaseConfigured } from './services/supabase';
-import { isGeminiConfigured } from './services/geminiService';
-import { RatelLogo } from './constants';
+import LandingPage from './LandingPage';
+import ChatView from './ChatView';
+import AuthModal from './AuthModal';
+import SettingsPage from './SettingsPage';
+import ContactPage from './ContactPage';
+import CommunityView from './CommunityView';
+import AdminDashboard from './AdminDashboard';
+import { UserProfile, AppSettings, RatelMode, Task } from '../types';
+import { playSound } from '../services/audioService';
+import { supabase, isSupabaseConfigured } from '../services/supabase';
+import { isGeminiConfigured } from '../services/geminiService';
+import { RatelLogo } from '../constants';
 import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
@@ -126,104 +126,111 @@ const App: React.FC = () => {
     }
 
     let isMounted = true;
-    let sessionTimeout: number;
-    
-    // This function runs all checks and initializes the user session.
+    const initTimeout = setTimeout(() => {
+        if (isMounted && loadingSession) {
+            setConnectionError("The application took too long to initialize. Please check your network and refresh the page.");
+            setLoadingSession(false);
+        }
+    }, 25000);
+
     const runChecksAndInit = async () => {
-        // Explicitly reset state for retries
         setLoadingSession(true);
         setConnectionError(null);
 
-        // Step 1: Check if the server can connect to Supabase.
+        // --- Step 1: Server-Side Health Check ---
         try {
             const response = await fetch('/api/heartbeat');
             if (!response.ok) {
                 const errorData = await response.json();
-                // This is a definitive server-side error.
                 throw new Error(`---SERVER CONNECTION FAILED---
-Your app's backend cannot connect to Supabase. This is almost always due to incorrect **server-side** environment variables in Vercel.
+Your app's backend cannot connect to Supabase. This is almost always due to incorrect **server-side** environment variables in your deployment platform (e.g., Vercel).
 
-**Please re-verify \`SUPABASE_URL\` and \`SUPABASE_ANON_KEY\` (without the 'VITE_' prefix) and re-deploy your project.**
+**Please re-verify your \`SUPABASE_URL\` and \`SUPABASE_ANON_KEY\` (without the 'VITE_' prefix) and re-deploy your project.**
 
 *Server error: ${errorData.message || 'Unknown'}*`);
             }
         } catch (e: any) {
-            // This catch handles both fetch failures and the thrown error from the check above.
             const errorMessage = e.message.startsWith('---SERVER') ? e.message : `---API ROUTE FAILED---
-Could not reach the app's own backend health check (/api/heartbeat). This could be a deployment issue. **Please try re-deploying your project in Vercel.**`;
+Could not reach the app's own backend health check at \`/api/heartbeat\`. This could be a deployment issue on Vercel or your hosting platform. **Please try re-deploying your project.**`;
             if (isMounted) {
                 setConnectionError(errorMessage);
                 setLoadingSession(false);
             }
-            return; // Stop initialization if server check fails.
+            return;
         }
 
-        // Step 2: Server is OK. Now, try connecting from the client.
-        sessionTimeout = window.setTimeout(() => {
-            if (isMounted && loadingSession) {
-                const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
-                const clientErrorMsg = `---CLIENT CONNECTION FAILED---
-Your app's backend successfully connected to Supabase, but **your browser could not**. This almost always means something on your computer or network is blocking the connection.
+        const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
+        const keyVite = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
 
-**Here are the most common solutions:**
+        // --- Step 2: Client-Side Direct Connectivity Test ---
+        try {
+            await fetch(`${urlVite}/rest/v1/`, {
+                method: 'HEAD',
+                headers: { 'apikey': keyVite! },
+                signal: AbortSignal.timeout(10000)
+            });
+        } catch (e: any) {
+            const directFetchError = `---DIRECT CONNECTION TEST FAILED---
+Your browser failed a direct test request to the Supabase URL. This **strongly suggests a network or browser-level block**.
 
-**1. Disable Browser Extensions (Especially Ad-Blockers):**
-*Extensions like uBlock Origin, AdBlock Plus, Brave Shields, or privacy blockers often mistakenly block Supabase.*
+This is the most likely reason for your connection issue.
+
+**Please try these steps in order:**
+
+**1. Disable Browser Extensions:**
+***Especially ad-blockers like uBlock Origin, AdBlock Plus, or Brave Shields often mistakenly block Supabase.***
 **Please disable them for this site and click "Retry".**
 
 **2. Try a Different Browser or Network:**
-*Switch to a different browser (like Chrome or Firefox) to see if a browser setting is the issue, or try connecting from a different Wi-Fi network (like a phone's hotspot) to rule out a firewall problem.*
+*Switch to another browser (like Chrome or Firefox) or try a different Wi-Fi network (like a phone's hotspot) to rule out a firewall problem.*
 
-**3. Final Check on Keys:**
-*It's very easy to make a small copy-paste error. Please **re-copy** your \`VITE_SUPABASE_ANON_KEY\` from your Supabase dashboard and paste it into Vercel, then re-deploy.*
-
-*URL in use: \`${urlVite || 'URL not found'}\`*`;
-                if (isMounted) {
-                    setConnectionError(clientErrorMsg);
-                    setLoadingSession(false);
-                }
-            }
-        }, 15000);
-
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            clearTimeout(sessionTimeout);
+*URL Tested: \`${urlVite || 'URL not found'}\`*
+*Error: ${e.message}*`;
             if (isMounted) {
-                await updateUserSession(session, isMounted);
+                setConnectionError(directFetchError);
                 setLoadingSession(false);
             }
-        } catch (err: any) {
-             clearTimeout(sessionTimeout);
-             const urlVite = (import.meta as any).env?.VITE_SUPABASE_URL;
-             const clientErrorMsg = `---CLIENT CONNECTION FAILED---
-Your browser cannot connect to Supabase. This is often caused by an ad-blocker, network issue, or incorrect **client-side** VITE_ variables.
+            return;
+        }
 
-**1. Disable any ad-blockers and try again.**
-**2. Re-verify \`VITE_SUPABASE_URL\` and \`VITE_SUPABASE_ANON_KEY\` (with the 'VITE_' prefix) and re-deploy.**
+        // --- Step 3: Supabase SDK Authentication ---
+        try {
+            const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+            if (sessionError) throw sessionError;
+            if (isMounted) await updateUserSession(session, isMounted);
+        } catch (err: any) {
+            const sdkErrorMsg = `---SDK AUTHENTICATION FAILED---
+Your browser connected to Supabase, but the authentication process failed or timed out. This can happen for a few reasons:
+
+**1. Incorrect \`VITE_SUPABASE_ANON_KEY\`:**
+*An invalid key is a common cause of auth failure. It's easy to make a small copy-paste error. Please **re-copy** your Anon Key from the Supabase dashboard and paste it into Vercel, then re-deploy.*
+
+**2. Browser/Extension Interference:**
+*Even if the initial connection passed, some extensions might interfere with the specific real-time connection Supabase uses for auth. Please try disabling them.*
+
+**3. Supabase Outage:**
+*Check the [Supabase Status Page](https://status.supabase.com/) for any ongoing incidents.*
 
 *URL in use: \`${urlVite || 'URL not found'}\`*
-*Error: ${err.message}*`;
-            if (isMounted) {
-                setConnectionError(clientErrorMsg);
-                setLoadingSession(false);
-            }
+*SDK Error: ${err.message}*`;
+            if (isMounted) setConnectionError(sdkErrorMsg);
+        } finally {
+            if (isMounted) setLoadingSession(false);
         }
     };
 
     runChecksAndInit();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        if(isMounted) {
-          await updateUserSession(session, isMounted);
-        }
+        if(isMounted) await updateUserSession(session, isMounted);
     });
 
     return () => {
         isMounted = false;
         subscription?.unsubscribe();
-        clearTimeout(sessionTimeout);
+        clearTimeout(initTimeout);
     };
-  }, [retry, updateUserSession]);
+}, [retry, updateUserSession]);
 
 
   // Save settings whenever they change
